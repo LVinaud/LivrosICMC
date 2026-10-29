@@ -41,7 +41,6 @@ def histograma_anos(livros, anos):
         d = contagem[contagem["genero"] == g]
         if len(d):
             fig.add_trace(go.Bar(x=d["ano"], y=d["livros"], name=g, marker_color=cor,
-                                 customdata=[g] * len(d),  # para saber o gênero da barra clicada
                                  hovertemplate=f"<b>%{{y}} livros</b><br>{g} · %{{x}}<extra></extra>"))
     fig.add_vrect(x0=anos[0] - 0.5, x1=anos[1] + 0.5, fillcolor=AZUL, opacity=0.08, line_width=0)
     fig.update_layout(barmode="stack", bargap=0.15, dragmode="select", selectdirection="h",
@@ -51,44 +50,40 @@ def histograma_anos(livros, anos):
     return layout_padrao(fig, 260)
 
 
-def treemap(livros):
-    """Treemap gênero -> assunto principal: área de cada retângulo = número de livros.
-    Clicar em um retângulo abre o nível de baixo."""
+def treemap(livros, conjunto=None):
+    """Treemap gênero -> assunto principal (no máximo 9 assuntos + "Outros assuntos" por gênero).
+    Área de cada retângulo = número de livros. conjunto = retângulo escolhido (None = todos):
+    o treemap fica aberto no gênero escolhido e o assunto escolhido ganha borda escura."""
     if livros.empty:
-        return vazio("Nenhum livro")
-    fig = px.treemap(livros, path=[px.Constant("Todos os livros"), "genero", "assunto_principal"],
+        return vazio("Nenhum livro nos anos escolhidos")
+    fig = px.treemap(livros, path=[px.Constant("Todos os livros"), "genero", "assunto_treemap"],
                      color="genero", color_discrete_map={"(?)": CINZA_CLARO, **CORES})
-    fig.update_traces(marker_line_color="white", marker_line_width=2, root_color=CINZA_CLARO,
-                      hovertemplate="<b>%{label}</b><br>%{value} livros<extra></extra>")
+    # Os retângulos têm ids do tipo "Todos os livros/Computação/INTELIGÊNCIA ARTIFICIAL"
+    genero_aberto = f"Todos os livros/{conjunto['genero']}" if conjunto else None
+    assunto = f"{genero_aberto}/{conjunto['assunto']}" if conjunto and conjunto.get("assunto") else None
+    ids = list(fig.data[0].ids)
+    if genero_aberto not in ids:  # o gênero escolhido não tem livros nos anos escolhidos
+        genero_aberto = None
+    fig.update_traces(
+        level=genero_aberto,  # retângulo que fica aberto (None = todos os livros)
+        marker_line_color=["#0b0b0b" if i == assunto else "white" for i in ids],
+        marker_line_width=[4 if i == assunto else 2 for i in ids],
+        root_color=CINZA_CLARO, hovertemplate="<b>%{label}</b><br>%{value} livros<extra></extra>",
+    )
     fig.update_layout(margin=dict(l=0, r=0, t=0, b=0))
     return layout_padrao(fig, 480)
 
 
-def pizza(livros):
-    """Pizza por gênero, na ordem fixa de CORES (começa às 12h, sentido horário)."""
-    contagem = livros["genero"].value_counts()
-    ordem = [g for g in CORES if g in contagem]
-    fig = go.Figure(go.Pie(
-        labels=ordem, values=[contagem[g] for g in ordem],
-        marker=dict(colors=[CORES[g] for g in ordem], line=dict(color="white", width=2)),
-        sort=False, direction="clockwise",
-        texttemplate="%{label}<br>%{percent:.0%}", textposition="outside",
-        hovertemplate="<b>%{label}</b><br>%{value} livros (%{percent})<extra></extra>",
-    ))
-    fig.update_layout(showlegend=False, margin=dict(l=40, r=40, t=30, b=30))
-    return layout_padrao(fig, 420)
-
-
 # Nuvem de palavras: a biblioteca wordcloud calcula onde cada palavra fica e o tamanho dela;
 # desenhamos as palavras com plotly porque assim dá para clicar nelas.
-LARGURA_NUVEM, ALTURA_NUVEM = 600, 380
+LARGURA_NUVEM, ALTURA_NUVEM = 900, 380
 
 
 def nuvem(titulos):
     contagem = Counter(p for t in titulos for p in palavras(t))  # nº de livros com a palavra no título
     if not contagem:
-        return vazio("Clique em uma fatia da pizza")
-    layout = WordCloud(width=LARGURA_NUVEM, height=ALTURA_NUVEM, prefer_horizontal=1, max_words=60,
+        return vazio("Nenhuma palavra")
+    layout = WordCloud(width=LARGURA_NUVEM, height=ALTURA_NUVEM, prefer_horizontal=1, max_words=80,
                        max_font_size=64, min_font_size=11, random_state=1).generate_from_frequencies(contagem).layout_
     x, y, textos, tamanhos = [], [], [], []
     alvo_x, alvo_y, alvo_tamanho, alvo_palavra = [], [], [], []
@@ -125,7 +120,7 @@ def globo(livros):
     logarítmica porque o Brasil tem muito mais livros que os outros países."""
     por_pais = livros[livros["pais_iso3"] != ""].groupby(["pais_iso3", "pais"]).size().reset_index(name="livros")
     if por_pais.empty:
-        return vazio("Nenhum livro")
+        return vazio("Nenhum livro nos anos escolhidos")
     fig = go.Figure(go.Choropleth(
         locations=por_pais["pais_iso3"], z=np.log10(por_pais["livros"]),
         text=por_pais["pais"], customdata=por_pais["livros"],
@@ -211,27 +206,3 @@ def dispersao_uso(livros):
     fig.update_yaxes(title="Empréstimos (campo a confirmar com a biblioteca)", gridcolor=CINZA_CLARO)
     fig.update_layout(legend=dict(orientation="h", y=1.1), margin=dict(l=60, r=10, t=40, b=50))
     return layout_padrao(fig, 520)
-
-
-def coordenadas_paralelas(livros):
-    """Coordenadas paralelas: cada livro é uma linha que passa pelos eixos. Arrastar sobre um eixo filtra."""
-    d = livros.dropna(subset=["ano"])
-    if d.empty:
-        return vazio("Nenhum livro")
-    # A cor da linha precisa ser um número: o gênero vira 0, 1, 2... e cada faixa da escala tem a cor dele
-    nomes = list(CORES)
-    escala = []
-    for i, cor in enumerate(CORES.values()):
-        escala += [[i / len(nomes), cor], [(i + 1) / len(nomes), cor]]
-    fig = go.Figure(go.Parcoords(
-        line=dict(color=d["genero"].map(nomes.index) + 0.5, colorscale=escala, cmin=0, cmax=len(nomes)),
-        dimensions=[
-            dict(label="Ano", values=d["ano"], tickformat="d"),  # "d" = número inteiro (2015, não 2,015)
-            dict(label="Páginas (0 = sem info)", values=d["paginas"].fillna(0)),
-            dict(label="Exemplares no ICMC", values=d["exemplares"]),
-            dict(label="Empréstimos", values=d["emprestimos"]),
-            dict(label="Bibliotecas da USP com o livro", values=d["n_bibliotecas_usp"]),
-        ],
-    ))
-    fig.update_layout(margin=dict(l=60, r=60, t=50, b=20))
-    return layout_padrao(fig, 460)
