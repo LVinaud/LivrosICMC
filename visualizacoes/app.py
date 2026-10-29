@@ -14,7 +14,6 @@ import os
 import numpy as np
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 from dash import Dash, Input, Output, ctx, dash_table, dcc, html
 
 PASTA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dados")
@@ -25,26 +24,20 @@ livros = pd.read_csv(os.path.join(PASTA, "livros_tratados.csv"))
 CORES = {"Computação": "#2a78d6", "Matemática": "#eb6834", "Educação": "#1baf7a", "Literatura": "#eda100",
          "História e biografias": "#e87ba4", "Estatística": "#008300", "Outros": "#a3a29c"}
 
-# 1. Rosa: os 5 livros mais emprestados de cada gênero, do centro para fora
+# 1. Barras horizontais: os 5 livros mais emprestados de cada gênero, um painel por gênero
 top5 = livros.sort_values("emprestimos", ascending=False).groupby("genero").head(5).copy()
-top5["posicao"] = top5.groupby("genero").cumcount()  # 0 = o mais emprestado do gênero
-top5["acumulado"] = top5.groupby("genero")["emprestimos"].cumsum()
-# O raio é a raiz quadrada do acumulado: assim a ÁREA de cada pedaço é proporcional aos empréstimos
-top5["raio_fim"] = np.sqrt(top5["acumulado"])
-top5["raio_inicio"] = np.sqrt(top5["acumulado"] - top5["emprestimos"])
-rosa = go.Figure(go.Barpolar(
-    theta=top5["genero"], base=top5["raio_inicio"], r=top5["raio_fim"] - top5["raio_inicio"],
-    marker_color=top5["genero"].map(CORES), marker_opacity=1 - 0.15 * top5["posicao"],  # mais claro = menos emprestado
-    marker_line_color="white", marker_line_width=1.5,
-    customdata=top5[["id", "titulo", "emprestimos"]],
-    hovertemplate="<b>%{customdata[1]}</b><br>%{theta}<br>%{customdata[2]} empréstimos<extra></extra>",
-))
-marcas = [50, 100, 250, 500, 1000]
-rosa.update_layout(height=600, showlegend=False, polar=dict(
-    angularaxis=dict(direction="clockwise", rotation=90, categoryorder="array", categoryarray=list(CORES)),
-    # escala de empréstimos na divisa entre a primeira e a última fatia, para não cobrir os pedaços
-    radialaxis=dict(tickvals=np.sqrt(marcas), ticktext=marcas, angle=90 + 180 / len(CORES), tickangle=90),
-))
+# Rótulo do eixo: posição + título curto (a posição evita juntar dois livros com o mesmo título)
+top5["rotulo"] = (top5.groupby("genero").cumcount() + 1).astype(str) + "º " + top5["titulo"].str.slice(0, 45)
+# Gêneros do que tem mais empréstimos para o que tem menos
+ordem_generos = livros.groupby("genero")["emprestimos"].sum().sort_values(ascending=False).index.tolist()
+barras = px.bar(top5, x="emprestimos", y="rotulo", color="genero", facet_row="genero", orientation="h",
+                text="emprestimos", custom_data=["id", "titulo"], color_discrete_map=CORES,
+                category_orders={"genero": ordem_generos}, labels={"emprestimos": "Empréstimos", "rotulo": ""})
+barras.update_traces(textposition="outside", hovertemplate="<b>%{customdata[1]}</b><br>%{x} empréstimos<extra></extra>")
+# Cada painel mostra só os seus livros, do 1º (em cima) ao 5º; a escala de x é a mesma em todos
+barras.update_yaxes(matches=None, categoryorder="category descending")
+barras.for_each_annotation(lambda a: a.update(text=a.text.replace("genero=", "")))  # "genero=Matemática" -> "Matemática"
+barras.update_layout(height=1100, showlegend=False)
 
 # 2. Mapa: livros por país de publicação. A cor usa escala logarítmica (1, 10, 100...) porque o Brasil
 #    tem muito mais livros que os outros países; numa escala comum todos os outros ficariam iguais.
@@ -56,12 +49,15 @@ mapa.update_traces(hovertemplate="<b>%{hovertext}</b><br>%{customdata[0]} livros
 mapa.update_coloraxes(colorbar=dict(title="Livros", tickvals=[0, 1, 2, 3], ticktext=["1", "10", "100", "1000"]))
 mapa.update_layout(height=520, margin=dict(l=0, r=0, t=0, b=0))
 
-# 3. Linha do tempo: livros publicados por ano e gênero
-por_ano = livros.groupby(["ano", "genero"]).size().reset_index(name="livros")
-linha = px.bar(por_ano, x="ano", y="livros", color="genero", custom_data=["genero"],
-               color_discrete_map=CORES, category_orders={"genero": list(CORES)},
-               labels={"ano": "Ano de publicação", "livros": "Livros", "genero": "Gênero"})
-linha.update_layout(height=460)
+# 3. Linha do tempo: livros publicados por ano, uma linha por gênero
+anos = range(livros["ano"].min(), livros["ano"].max() + 1)
+# Tabela ano x gênero com 0 nos anos sem livro (senão a linha ligaria direto os anos com livros)
+por_ano = (livros.groupby(["ano", "genero"]).size().unstack(fill_value=0).reindex(anos, fill_value=0)
+           .stack().reset_index(name="livros"))
+linha = px.line(por_ano, x="ano", y="livros", color="genero", markers=True, custom_data=["genero"],
+                color_discrete_map=CORES, category_orders={"genero": list(CORES)},
+                labels={"ano": "Ano de publicação", "livros": "Livros", "genero": "Gênero"})
+linha.update_layout(height=460, hovermode="x unified")  # o mouse num ano mostra todos os gêneros
 
 COLUNAS = {"titulo": "Título", "autores": "Autores", "ano": "Ano", "genero": "Gênero", "pais": "País",
            "idioma": "Idioma", "exemplares": "Exemplares", "emprestimos": "Empréstimos"}
@@ -73,9 +69,9 @@ app.layout = html.Div(style={"fontFamily": "sans-serif", "maxWidth": "1200px", "
     dcc.Tabs([
         dcc.Tab(label="Empréstimos", children=[
             html.H3("Quais livros são mais emprestados em cada gênero?"),
-            html.P("Cada fatia é um gênero; dentro dela estão os 5 livros mais emprestados, do centro para fora "
-                   "(mais escuro = mais emprestado). A área de cada pedaço é proporcional ao número de empréstimos."),
-            dcc.Graph(id="rosa", figure=rosa),
+            html.P("Os 5 livros mais emprestados de cada gênero. Os gêneros vão do que tem mais empréstimos para o que "
+                   "tem menos, e todos usam a mesma escala. Clique numa barra para ver o livro."),
+            dcc.Graph(id="barras", figure=barras),
         ]),
         dcc.Tab(label="Origem", children=[
             html.H3("De onde vêm os livros do acervo?"),
@@ -84,7 +80,8 @@ app.layout = html.Div(style={"fontFamily": "sans-serif", "maxWidth": "1200px", "
         ]),
         dcc.Tab(label="Linha do tempo", children=[
             html.H3("Quantos livros de cada gênero foram publicados por ano?"),
-            html.P("Clique em uma barra para ver os livros daquele gênero e ano."),
+            html.P("Clique num ponto para ver os livros daquele gênero e ano; clique num gênero da legenda para "
+                   "escondê-lo ou mostrá-lo."),
             dcc.Graph(id="linha", figure=linha),
         ]),
     ]),
@@ -97,13 +94,13 @@ app.layout = html.Div(style={"fontFamily": "sans-serif", "maxWidth": "1200px", "
 
 
 @app.callback(Output("titulo-tabela", "children"), Output("tabela", "data"),
-              Input("rosa", "clickData"), Input("mapa", "clickData"), Input("linha", "clickData"),
+              Input("barras", "clickData"), Input("mapa", "clickData"), Input("linha", "clickData"),
               Input("limpar", "n_clicks"))
-def mostrar_livros(clique_rosa, clique_mapa, clique_linha, _):
+def mostrar_livros(clique_barras, clique_mapa, clique_linha, _):
     """Mostra na tabela os livros do último gráfico clicado."""
     escolhidos, texto = livros, "Todos os livros"
-    if ctx.triggered_id == "rosa":
-        id_livro, titulo, _emprestimos = clique_rosa["points"][0]["customdata"]
+    if ctx.triggered_id == "barras":
+        id_livro, titulo = clique_barras["points"][0]["customdata"]
         escolhidos, texto = livros[livros["id"] == id_livro], titulo
     elif ctx.triggered_id == "mapa":
         ponto = clique_mapa["points"][0]
