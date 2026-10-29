@@ -101,6 +101,9 @@ def extrair(doc, raiz):
         "autores": " | ".join(campo(raiz, "display/creator") + campo(raiz, "display/contributor")),
         "ano": " | ".join(campo(raiz, "display/creationdate")),
         "editora": " | ".join(campo(raiz, "addata/pub")),
+        "local_publicacao": " | ".join(campo(raiz, "addata/cop")),
+        # Código MARC do país de publicação (campo 008 do registro), ex.: bl = Brasil, nyu = Nova York (EUA)
+        "codigo_pais_marc": " | ".join(campo(raiz, "dedup/f8")),
         "paginas": paginas.group(1) if paginas else "",
         "idioma": " | ".join(campo(raiz, "display/language")),
         "assuntos": " | ".join(campo(raiz, "search/subject")),
