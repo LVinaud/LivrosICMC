@@ -1,6 +1,8 @@
 """
-App com as visualizações dos livros da Biblioteca do ICMC (entrega 1).
+App com as visualizações dos livros da Biblioteca do ICMC (entrega 2: visões coordenadas).
 
+- No topo, o filtro de anos: arrastar sobre o histograma (linking + brushing) ou usar o controle
+  deslizante logo abaixo (consulta dinâmica). Ele vale para todos os gráficos.
 - Cada aba responde a uma pergunta sobre o acervo.
 - Clicar em um retângulo, fatia, palavra, barra, país, idioma, assunto ou ponto lista os livros
   correspondentes na tabela no fim da página.
@@ -14,11 +16,18 @@ import graficos
 from dados import carregar, palavras, separar
 
 livros = carregar()
+ANO_MIN, ANO_MAX = int(livros["ano"].min()), int(livros["ano"].max())
+passo = 1 if ANO_MAX - ANO_MIN <= 12 else 5 if ANO_MAX - ANO_MIN <= 60 else 10
+marcas = {a: str(a) for a in range(ANO_MIN, ANO_MAX + 1) if a % passo == 0 or a in (ANO_MIN, ANO_MAX)}
 
 COLUNAS_TABELA = {"titulo": "Título", "autores": "Autores", "ano": "Ano", "genero": "Gênero", "pais": "País",
                   "idioma": "Idioma", "exemplares": "Exemplares", "emprestimos": "Empréstimos"}
 SEM_BARRA = {"displayModeBar": False}
 lado_a_lado = {"display": "flex", "gap": "24px", "flexWrap": "wrap", "alignItems": "flex-start"}
+
+
+def filtrar_anos(tabela, anos):
+    return tabela[tabela["ano"].between(anos[0], anos[1])]
 
 
 def filtrar_selecao(tabela, selecao):
@@ -46,53 +55,49 @@ def filtrar_selecao(tabela, selecao):
 app = Dash(__name__, title="Livros do ICMC")
 app.layout = html.Div(style={"fontFamily": "sans-serif", "maxWidth": "1250px", "margin": "auto", "padding": "0 16px"}, children=[
     html.H1("Livros da Biblioteca do ICMC"),
-    html.P(f"{len(livros)} livros. Cada aba responde a uma pergunta sobre o acervo. "
-           "Clique nos gráficos para listar os livros no fim da página."),
+    html.P(f"{len(livros)} livros. Escolha os anos de publicação arrastando sobre o histograma ou no controle "
+           "abaixo dele: todos os gráficos seguem essa escolha. Clique nos gráficos para listar os livros no fim da página."),
+    dcc.Graph(id="histograma", config=SEM_BARRA),
+    dcc.RangeSlider(id="anos", min=ANO_MIN, max=ANO_MAX, step=1, value=[ANO_MIN, ANO_MAX], marks=marcas,
+                    tooltip={"placement": "bottom"}),
 
-    dcc.Tabs(children=[
+    dcc.Tabs(style={"marginTop": "16px"}, children=[
         dcc.Tab(label="Composição", children=[
             html.H3("Do que é feito o acervo?"),
             html.P("Gênero → assunto principal; clique em um retângulo para abrir o nível de baixo."),
-            dcc.Graph(id="treemap", figure=graficos.treemap(livros), config=SEM_BARRA),
+            dcc.Graph(id="treemap", config=SEM_BARRA),
             html.Div(style=lado_a_lado, children=[
-                dcc.Graph(id="pizza", figure=graficos.pizza(livros), config=SEM_BARRA,
-                          style={"flex": "1 1 420px", "minWidth": 0}),
+                dcc.Graph(id="pizza", config=SEM_BARRA, style={"flex": "1 1 420px", "minWidth": 0}),
                 html.Div(style={"flex": f"0 0 {graficos.LARGURA_NUVEM}px"}, children=[
                     html.H4(id="titulo-nuvem"),
                     dcc.Graph(id="nuvem", config=SEM_BARRA),
                 ]),
             ]),
         ]),
-        dcc.Tab(label="Atualização", children=[
-            html.H3("Quão atualizado é o acervo?"),
-            html.P("Livros por ano de publicação e gênero; clique em uma barra para ver os livros."),
-            dcc.Graph(id="histograma", figure=graficos.histograma_anos(livros)),
-        ]),
         dcc.Tab(label="Origem", children=[
             html.H3("De onde vem o acervo?"),
             html.P("País de publicação (arraste para girar o globo) e idioma dos livros."),
             html.Div(style=lado_a_lado, children=[
-                dcc.Graph(id="globo", figure=graficos.globo(livros), style={"flex": "2 1 520px", "minWidth": 0}),
-                dcc.Graph(id="idiomas", figure=graficos.idiomas(livros), config=SEM_BARRA,
-                          style={"flex": "1 1 300px", "minWidth": 0}),
+                dcc.Graph(id="globo", style={"flex": "2 1 520px", "minWidth": 0}),
+                dcc.Graph(id="idiomas", config=SEM_BARRA, style={"flex": "1 1 300px", "minWidth": 0}),
             ]),
         ]),
         dcc.Tab(label="Relações", children=[
             html.H3("Quais assuntos andam juntos?"),
             html.P("Cada círculo é um assunto (tamanho = nº de livros, cor = gênero, como na pizza); uma linha liga "
                    "dois assuntos que aparecem no mesmo livro. Só entram assuntos de 2 ou mais livros."),
-            dcc.Graph(id="rede", figure=graficos.rede_assuntos(livros)),
+            dcc.Graph(id="rede"),
         ]),
         dcc.Tab(label="Uso", children=[
             html.H3("Quais livros são mais procurados?"),
             html.P("Cada ponto é um livro; o tamanho é o número de exemplares no ICMC. Livros no alto com pontos "
                    "pequenos são muito procurados e têm poucas cópias."),
-            dcc.Graph(id="dispersao", figure=graficos.dispersao_uso(livros)),
+            dcc.Graph(id="dispersao"),
         ]),
         dcc.Tab(label="Exploração", children=[
             html.H3("Exploração geral"),
             html.P("Cada linha é um livro (cor = gênero). Arraste sobre um eixo para filtrar; clique na faixa para desfazer."),
-            dcc.Graph(id="paralelas", figure=graficos.coordenadas_paralelas(livros)),
+            dcc.Graph(id="paralelas"),
         ]),
     ]),
 
@@ -109,13 +114,38 @@ app.layout = html.Div(style={"fontFamily": "sans-serif", "maxWidth": "1250px", "
 ])
 
 
-@app.callback(Output("titulo-nuvem", "children"), Output("nuvem", "figure"), Input("pizza", "clickData"))
-def mostrar_nuvem(clique):
-    """Clique em uma fatia: nuvem de palavras dos títulos daquele gênero."""
+@app.callback(Output("anos", "value"), Input("histograma", "selectedData"), prevent_initial_call=True)
+def selecionar_anos_no_histograma(selecionado):
+    """Linking + brushing: o intervalo arrastado no histograma vira o filtro de anos."""
+    if not selecionado or not selecionado.get("points"):
+        return no_update
+    anos = [p["x"] for p in selecionado["points"]]
+    return [int(min(anos)), int(max(anos))]
+
+
+@app.callback(
+    Output("histograma", "figure"), Output("treemap", "figure"), Output("pizza", "figure"),
+    Output("globo", "figure"), Output("idiomas", "figure"), Output("rede", "figure"),
+    Output("dispersao", "figure"), Output("paralelas", "figure"),
+    Input("anos", "value"),
+)
+def atualizar_graficos(anos):
+    """Redesenha os gráficos só com os livros publicados nos anos escolhidos."""
+    escolhidos = filtrar_anos(livros, anos)
+    return (graficos.histograma_anos(livros, anos), graficos.treemap(escolhidos), graficos.pizza(escolhidos),
+            graficos.globo(escolhidos), graficos.idiomas(escolhidos), graficos.rede_assuntos(escolhidos),
+            graficos.dispersao_uso(escolhidos), graficos.coordenadas_paralelas(escolhidos))
+
+
+@app.callback(Output("titulo-nuvem", "children"), Output("nuvem", "figure"),
+              Input("pizza", "clickData"), Input("anos", "value"))
+def mostrar_nuvem(clique, anos):
+    """Clique em uma fatia: nuvem de palavras dos títulos daquele gênero (nos anos escolhidos)."""
     if clique is None:
         return "Clique em uma fatia da pizza", graficos.nuvem([])
     genero = clique["points"][0]["label"]
-    return f"Palavras nos títulos: {genero}", graficos.nuvem(livros.loc[livros["genero"] == genero, "titulo"])
+    escolhidos = filtrar_anos(livros, anos)
+    return f"Palavras nos títulos: {genero}", graficos.nuvem(escolhidos.loc[escolhidos["genero"] == genero, "titulo"])
 
 
 @app.callback(
@@ -167,15 +197,16 @@ def selecionar(treemap, pizza, nuvem, histograma, globo, idiomas, rede, dispersa
     return no_update
 
 
-@app.callback(Output("titulo-tabela", "children"), Output("tabela", "data"), Input("selecao", "data"))
-def mostrar_tabela(selecao):
-    """Todos os livros ou, se houver, os do último clique."""
-    escolhidos, texto = livros, "Todos os livros"
+@app.callback(Output("titulo-tabela", "children"), Output("tabela", "data"),
+              Input("selecao", "data"), Input("anos", "value"))
+def mostrar_tabela(selecao, anos):
+    """Livros dos anos escolhidos e, se houver, do último clique."""
+    escolhidos, texto = filtrar_anos(livros, anos), "Todos os livros"
     if selecao:
-        escolhidos, texto = filtrar_selecao(livros, selecao), selecao["texto"]
+        escolhidos, texto = filtrar_selecao(escolhidos, selecao), selecao["texto"]
     tabela = escolhidos[list(COLUNAS_TABELA)].copy()
     tabela["ano"] = tabela["ano"].map(lambda a: "" if pd.isna(a) else int(a))
-    return f"{texto}: {len(tabela)} livro(s)", tabela.to_dict("records")
+    return f"{texto}: {len(tabela)} livro(s) de {anos[0]} a {anos[1]}", tabela.to_dict("records")
 
 
 if __name__ == "__main__":

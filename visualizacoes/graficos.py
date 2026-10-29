@@ -32,8 +32,9 @@ def vazio(mensagem):
     return layout_padrao(fig, 200)
 
 
-def histograma_anos(livros):
-    """Barras empilhadas: livros por ano de publicação e gênero."""
+def histograma_anos(livros, anos):
+    """Barras empilhadas: livros por ano de publicação e gênero. A faixa de anos escolhida fica destacada.
+    Arrastar sobre o gráfico seleciona um intervalo de anos (linking + brushing: dragmode="select")."""
     contagem = livros.dropna(subset=["ano"]).groupby(["ano", "genero"]).size().reset_index(name="livros")
     fig = go.Figure()
     for g, cor in CORES.items():
@@ -42,11 +43,12 @@ def histograma_anos(livros):
             fig.add_trace(go.Bar(x=d["ano"], y=d["livros"], name=g, marker_color=cor,
                                  customdata=[g] * len(d),  # para saber o gênero da barra clicada
                                  hovertemplate=f"<b>%{{y}} livros</b><br>{g} · %{{x}}<extra></extra>"))
-    fig.update_layout(barmode="stack", bargap=0.15, legend=dict(orientation="h", y=1.12),
-                      margin=dict(l=50, r=10, t=30, b=40))
+    fig.add_vrect(x0=anos[0] - 0.5, x1=anos[1] + 0.5, fillcolor=AZUL, opacity=0.08, line_width=0)
+    fig.update_layout(barmode="stack", bargap=0.15, dragmode="select", selectdirection="h",
+                      legend=dict(orientation="h", y=1.18), margin=dict(l=50, r=10, t=30, b=40))
     fig.update_xaxes(title="Ano de publicação")
     fig.update_yaxes(title="Livros", gridcolor=CINZA_CLARO)
-    return layout_padrao(fig, 460)
+    return layout_padrao(fig, 260)
 
 
 def treemap(livros):
