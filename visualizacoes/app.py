@@ -1,83 +1,119 @@
 """
-App com as visualizações dos livros da Biblioteca do ICMC (entrega 1).
+Visualizações dos livros da Biblioteca do ICMC (entrega 1).
 
-- Empréstimos: rosa (polar area) com os 5 livros mais emprestados de cada gênero.
-- Origem: globo com o número de livros por país de publicação.
+- Empréstimos: rosa com os 5 livros mais emprestados de cada gênero.
+- Origem: mapa com o número de livros por país de publicação.
 - Linha do tempo: livros publicados por ano e gênero.
-- Clicar em um pedaço da rosa, em um país ou em uma barra lista os livros na tabela no fim da página.
+Clicar num gráfico mostra os livros correspondentes na tabela no fim da página.
 
+Lê dados/livros_tratados.csv (gerado por processamento/tratar_dados.py).
 Uso: python app.py   e abrir http://127.0.0.1:8050
 """
+import os
+
+import numpy as np
 import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
 from dash import Dash, Input, Output, ctx, dash_table, dcc, html
 
-import graficos
-from dados import carregar
+PASTA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dados")
+livros = pd.read_csv(os.path.join(PASTA, "livros_tratados.csv"))
 
-livros = carregar()
+# Uma cor por gênero, a mesma em todos os gráficos. Nesta ordem, cores vizinhas continuam
+# distinguíveis por quem tem daltonismo (verificado com um simulador de daltonismo).
+CORES = {"Computação": "#2a78d6", "Matemática": "#eb6834", "Educação": "#1baf7a", "Literatura": "#eda100",
+         "História e biografias": "#e87ba4", "Estatística": "#008300", "Outros": "#a3a29c"}
 
-COLUNAS_TABELA = {"titulo": "Título", "autores": "Autores", "ano": "Ano", "genero": "Gênero", "pais": "País",
-                  "idioma": "Idioma", "exemplares": "Exemplares", "emprestimos": "Empréstimos"}
+# 1. Rosa: os 5 livros mais emprestados de cada gênero, do centro para fora
+top5 = livros.sort_values("emprestimos", ascending=False).groupby("genero").head(5).copy()
+top5["posicao"] = top5.groupby("genero").cumcount()  # 0 = o mais emprestado do gênero
+top5["acumulado"] = top5.groupby("genero")["emprestimos"].cumsum()
+# O raio é a raiz quadrada do acumulado: assim a ÁREA de cada pedaço é proporcional aos empréstimos
+top5["raio_fim"] = np.sqrt(top5["acumulado"])
+top5["raio_inicio"] = np.sqrt(top5["acumulado"] - top5["emprestimos"])
+rosa = go.Figure(go.Barpolar(
+    theta=top5["genero"], base=top5["raio_inicio"], r=top5["raio_fim"] - top5["raio_inicio"],
+    marker_color=top5["genero"].map(CORES), marker_opacity=1 - 0.15 * top5["posicao"],  # mais claro = menos emprestado
+    marker_line_color="white", marker_line_width=1.5,
+    customdata=top5[["id", "titulo", "emprestimos"]],
+    hovertemplate="<b>%{customdata[1]}</b><br>%{theta}<br>%{customdata[2]} empréstimos<extra></extra>",
+))
+marcas = [50, 100, 250, 500, 1000]
+rosa.update_layout(height=600, showlegend=False, polar=dict(
+    angularaxis=dict(direction="clockwise", rotation=90, categoryorder="array", categoryarray=list(CORES)),
+    # escala de empréstimos na divisa entre a primeira e a última fatia, para não cobrir os pedaços
+    radialaxis=dict(tickvals=np.sqrt(marcas), ticktext=marcas, angle=90 + 180 / len(CORES), tickangle=90),
+))
+
+# 2. Mapa: livros por país de publicação. A cor usa escala logarítmica (1, 10, 100...) porque o Brasil
+#    tem muito mais livros que os outros países; numa escala comum todos os outros ficariam iguais.
+por_pais = livros.groupby(["pais_iso3", "pais"]).size().reset_index(name="livros")
+mapa = px.choropleth(por_pais, locations="pais_iso3", color=np.log10(por_pais["livros"]), hover_name="pais",
+                     custom_data=["livros"], projection="natural earth",
+                     color_continuous_scale=["#86b6ef", "#0d366b"])  # um só tom de azul, bom para daltônicos
+mapa.update_traces(hovertemplate="<b>%{hovertext}</b><br>%{customdata[0]} livros<extra></extra>")
+mapa.update_coloraxes(colorbar=dict(title="Livros", tickvals=[0, 1, 2, 3], ticktext=["1", "10", "100", "1000"]))
+mapa.update_layout(height=520, margin=dict(l=0, r=0, t=0, b=0))
+
+# 3. Linha do tempo: livros publicados por ano e gênero
+por_ano = livros.groupby(["ano", "genero"]).size().reset_index(name="livros")
+linha = px.bar(por_ano, x="ano", y="livros", color="genero", custom_data=["genero"],
+               color_discrete_map=CORES, category_orders={"genero": list(CORES)},
+               labels={"ano": "Ano de publicação", "livros": "Livros", "genero": "Gênero"})
+linha.update_layout(height=460)
+
+COLUNAS = {"titulo": "Título", "autores": "Autores", "ano": "Ano", "genero": "Gênero", "pais": "País",
+           "idioma": "Idioma", "exemplares": "Exemplares", "emprestimos": "Empréstimos"}
 
 app = Dash(__name__, title="Livros do ICMC")
-app.layout = html.Div(style={"fontFamily": "sans-serif", "maxWidth": "1250px", "margin": "auto", "padding": "0 16px"}, children=[
+app.layout = html.Div(style={"fontFamily": "sans-serif", "maxWidth": "1200px", "margin": "auto"}, children=[
     html.H1("Livros da Biblioteca do ICMC"),
-    html.P(f"{len(livros)} livros publicados de {int(livros['ano'].min())} a {int(livros['ano'].max())}. "
-           "Clique nos gráficos para listar os livros no fim da página."),
-
-    dcc.Tabs(children=[
+    html.P(f"{len(livros)} livros. Clique nos gráficos para ver os livros na tabela no fim da página."),
+    dcc.Tabs([
         dcc.Tab(label="Empréstimos", children=[
             html.H3("Quais livros são mais emprestados em cada gênero?"),
             html.P("Cada fatia é um gênero; dentro dela estão os 5 livros mais emprestados, do centro para fora "
-                   "(tom mais escuro = mais emprestado). A área de cada pedaço é proporcional ao número de empréstimos."),
-            dcc.Graph(id="rosa", figure=graficos.rosa_emprestimos(livros), config={"displayModeBar": False}),
+                   "(mais escuro = mais emprestado). A área de cada pedaço é proporcional ao número de empréstimos."),
+            dcc.Graph(id="rosa", figure=rosa),
         ]),
         dcc.Tab(label="Origem", children=[
-            html.H3("De onde vem o acervo?"),
-            html.P("Número de livros por país de publicação. Arraste para girar o globo."),
-            dcc.Graph(id="globo", figure=graficos.globo(livros)),
+            html.H3("De onde vêm os livros do acervo?"),
+            html.P("Número de livros por país de publicação."),
+            dcc.Graph(id="mapa", figure=mapa),
         ]),
         dcc.Tab(label="Linha do tempo", children=[
             html.H3("Quantos livros de cada gênero foram publicados por ano?"),
             html.P("Clique em uma barra para ver os livros daquele gênero e ano."),
-            dcc.Graph(id="linha", figure=graficos.linha_do_tempo(livros)),
+            dcc.Graph(id="linha", figure=linha),
         ]),
     ]),
-
-    html.Div(style={"display": "flex", "alignItems": "center", "gap": "12px", "marginTop": "24px"}, children=[
-        html.H3(id="titulo-tabela"),
-        html.Button("Limpar seleção", id="limpar"),
-    ]),
-    dash_table.DataTable(
-        id="tabela", columns=[{"id": c, "name": n} for c, n in COLUNAS_TABELA.items()],
-        page_size=15, sort_action="native", filter_action="native",
-        style_cell={"textAlign": "left", "whiteSpace": "normal", "height": "auto", "fontFamily": "sans-serif"},
-    ),
+    html.H3(id="titulo-tabela"),
+    html.Button("Mostrar todos os livros", id="limpar"),
+    dash_table.DataTable(id="tabela", columns=[{"id": c, "name": n} for c, n in COLUNAS.items()],
+                         page_size=15, sort_action="native", filter_action="native",
+                         style_cell={"textAlign": "left", "whiteSpace": "normal", "height": "auto"}),
 ])
 
 
 @app.callback(Output("titulo-tabela", "children"), Output("tabela", "data"),
-              Input("rosa", "clickData"), Input("globo", "clickData"), Input("linha", "clickData"),
+              Input("rosa", "clickData"), Input("mapa", "clickData"), Input("linha", "clickData"),
               Input("limpar", "n_clicks"))
-def mostrar_tabela(clique_rosa, clique_globo, clique_linha, _):
-    """Livros do último clique: pedaço da rosa (um livro), país ou barra (gênero + ano)."""
-    origem = ctx.triggered_id
-    if origem == "rosa" and clique_rosa:
-        livro_id, titulo = clique_rosa["points"][0]["customdata"][:2]
-        escolhidos, texto = livros[livros["id"] == livro_id], f"Livro: {titulo}"
-    elif origem == "globo" and clique_globo:
-        ponto = clique_globo["points"][0]
-        escolhidos, texto = livros[livros["pais_iso3"] == ponto["location"]], f"País: {ponto['text']}"
-    elif origem == "linha" and clique_linha:
+def mostrar_livros(clique_rosa, clique_mapa, clique_linha, _):
+    """Mostra na tabela os livros do último gráfico clicado."""
+    escolhidos, texto = livros, "Todos os livros"
+    if ctx.triggered_id == "rosa":
+        id_livro, titulo, _emprestimos = clique_rosa["points"][0]["customdata"]
+        escolhidos, texto = livros[livros["id"] == id_livro], titulo
+    elif ctx.triggered_id == "mapa":
+        ponto = clique_mapa["points"][0]
+        escolhidos, texto = livros[livros["pais_iso3"] == ponto["location"]], f"Publicados em: {ponto['hovertext']}"
+    elif ctx.triggered_id == "linha":
         ponto = clique_linha["points"][0]
-        genero, ano = ponto["customdata"], ponto["x"]
-        escolhidos = livros[(livros["genero"] == genero) & (livros["ano"] == ano)]
-        texto = f"{genero} publicados em {ano}"
-    else:  # início ou "Limpar seleção"
-        escolhidos, texto = livros, "Todos os livros"
-    tabela = escolhidos[list(COLUNAS_TABELA)].sort_values("emprestimos", ascending=False)
-    tabela["ano"] = tabela["ano"].map(lambda a: "" if pd.isna(a) else int(a))
-    return f"{texto}: {len(tabela)} livro(s)", tabela.to_dict("records")
+        genero, ano = ponto["customdata"][0], ponto["x"]
+        escolhidos, texto = livros[(livros["genero"] == genero) & (livros["ano"] == ano)], f"{genero} em {ano}"
+    escolhidos = escolhidos.sort_values("emprestimos", ascending=False)
+    return f"{texto} ({len(escolhidos)} livro(s))", escolhidos[list(COLUNAS)].to_dict("records")
 
 
 if __name__ == "__main__":
