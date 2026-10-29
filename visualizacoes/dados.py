@@ -10,39 +10,28 @@ import pandas as pd
 
 PASTA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "dados")
 
-# Gênero = primeiro grupo cujas palavras-chave aparecem nos assuntos do livro (senão, "Outros").
+# Gênero = primeiro grupo cujas palavras-chave aparecem no assunto principal do livro; se nenhum casar,
+# olhamos todos os assuntos; se ainda assim nada casar, "Outros".
 # A ordem importa: o primeiro que casar vence (ex.: "EDUCAÇÃO MATEMÁTICA" fica em Educação).
 GENEROS = {
     "Computação": ["COMPUTAÇÃO", "COMPUTADOR", "PROGRAMAÇÃO", "SOFTWARE", "INTELIGÊNCIA ARTIFICIAL",
                    "SISTEMAS OPERACIONAIS", "PYTHON", "JAVA", "ALGORITMO", "BANCO DE DADOS", "REDES",
-                   "PROCESSAMENTO DE IMAGENS", "ROBÓTICA", "INTERNET", "JOGOS"],
-    "Estatística": ["ESTATÍSTICA", "PROBABILIDADE"],
+                   "PROCESSAMENTO DE IMAGENS", "ROBÓTICA", "INTERNET", "JOGOS", "MINERAÇÃO DE DADOS",
+                   "APRENDIZADO", "RECONHECIMENTO DE PADRÕES", "CIÊNCIA DE DADOS"],
+    "Estatística": ["ESTATÍSTICA", "PROBABILIDADE", "SÉRIES TEMPORAIS", "ECONOMETRIA"],
     "Educação": ["EDUCAÇÃO", "ENSINO", "PROFESSORES", "ESCOLA", "APRENDIZAGEM"],
-    "Matemática": ["MATEMÁTICA", "ÁLGEBRA", "EQUAÇÕES", "GEOMETRIA", "CÁLCULO", "ANÁLISE", "TOPOLOGIA",
-                   "LÓGICA", "NÚMEROS"],
+    "Matemática": ["MATEMÁTICA", "ÁLGEBRA", "EQUAÇÕES", "GEOMETRIA", "CÁLCULO", "TOPOLOGIA", "LÓGICA",
+                   "NÚMEROS", "ANÁLISE NUMÉRICA", "ANÁLISE MATEMÁTICA", "ANÁLISE REAL", "ANÁLISE FUNCIONAL"],
     "Literatura": ["LITERATURA", "FICÇÃO", "ROMANCE", "CONTOS", "POESIA"],
-    "História e biografias": ["HISTÓRIA", "BIOGRAFIA"],
+    "História e biografias": ["HISTÓRIA", "BIOGRAFIA", "CIENTISTAS"],
 }
 # Cada gênero tem sempre a mesma cor, em todos os gráficos. Nesta ordem, cores vizinhas
-# (fatias da pizza, blocos empilhados) foram verificadas para continuar distinguíveis por daltônicos.
+# (fatias da rosa, blocos empilhados) foram verificadas para continuar distinguíveis por daltônicos.
 CORES = {"Computação": "#2a78d6", "Matemática": "#eb6834", "Educação": "#1baf7a", "Literatura": "#eda100",
          "História e biografias": "#e87ba4", "Estatística": "#008300", "Outros": "#a3a29c"}
 
 IDIOMAS = {"por": "Português", "eng": "Inglês", "spa": "Espanhol", "fre": "Francês", "ger": "Alemão",
            "ita": "Italiano", "rus": "Russo", "jpn": "Japonês", "chi": "Chinês"}
-
-# Palavras que não dizem nada sobre o assunto (as de até 2 letras já são descartadas)
-PALAVRAS_VAZIAS = {"com", "como", "das", "dos", "entre", "nas", "nos", "para", "pela", "pelas", "pelo",
-                   "pelos", "por", "que", "sem", "sobre", "sua", "suas", "seu", "seus", "uma", "uns", "umas",
-                   "the", "and", "for", "with", "from", "its", "into"}
-
-
-def genero(assuntos):
-    """Primeiro gênero cujas palavras-chave aparecem nos assuntos."""
-    for nome, chaves in GENEROS.items():
-        if any(chave in assuntos.upper() for chave in chaves):
-            return nome
-    return "Outros"
 
 
 def separar(texto):
@@ -50,18 +39,16 @@ def separar(texto):
     return [parte.strip() for parte in texto.split("|") if parte.strip()]
 
 
-def palavras(titulo):
-    """Conjunto de palavras do título (sem números, sem palavras vazias e sem repetição)."""
-    return {p for p in re.findall(r"[^\W\d_]+", titulo.lower()) if len(p) > 2 and p not in PALAVRAS_VAZIAS}
-
-
-def agrupar_assuntos(livros, maximo=9):
-    """Em cada gênero, mantém os 9 assuntos principais mais comuns e junta o resto em "Outros assuntos"
-    (assim o treemap não fica com dezenas de retângulos minúsculos)."""
-    def agrupar(assuntos):
-        mais_comuns = assuntos.value_counts().index[:maximo]
-        return assuntos.where(assuntos.isin(mais_comuns), "Outros assuntos")
-    return livros.groupby("genero")["assunto_principal"].transform(agrupar)
+def genero(assuntos):
+    """Gênero do livro pelas palavras-chave de GENEROS: primeiro no assunto principal, depois em todos."""
+    # O que está entre parênteses são subdivisões, não o assunto: "CÁLCULO (ESTUDO E ENSINO)" -> "CÁLCULO"
+    lista = [re.sub(r"\(.*?\)", "", a) for a in separar(assuntos)]
+    for candidatos in (lista[:1], lista):
+        texto = " | ".join(candidatos).upper()
+        for nome, chaves in GENEROS.items():
+            if any(chave in texto for chave in chaves):
+                return nome
+    return "Outros"
 
 
 def carregar():
@@ -70,7 +57,6 @@ def carregar():
     livros["ano"] = pd.to_numeric(livros["ano"].str.extract(r"(\d{4})")[0], errors="coerce")
     livros["genero"] = livros["assuntos"].map(genero)
     livros["assunto_principal"] = livros["assuntos"].map(lambda a: (separar(a) or ["(sem assunto)"])[0])
-    livros["assunto_treemap"] = agrupar_assuntos(livros)
     livros["idioma"] = livros["idioma"].str.split(r"[;|]").str[0].str.strip().map(lambda i: IDIOMAS.get(i, i or "?"))
     livros["paginas"] = pd.to_numeric(livros["paginas"], errors="coerce")
     livros["exemplares"] = pd.to_numeric(livros["exemplares_icmc"], errors="coerce").fillna(0).astype(int)

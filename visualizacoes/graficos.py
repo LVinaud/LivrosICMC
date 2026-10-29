@@ -1,13 +1,10 @@
 """
 Uma função para cada gráfico do app. Todas recebem a tabela de livros e devolvem uma figura do plotly.
 """
-from collections import Counter
-
-import plotly.express as px
+import numpy as np
 import plotly.graph_objects as go
-from wordcloud import WordCloud
 
-from dados import CORES, palavras
+from dados import CORES
 
 CINZA_CLARO = "#e1e0d9"
 TEXTO_SECUNDARIO = "#52514e"
@@ -27,83 +24,87 @@ def vazio(mensagem):
     return layout_padrao(fig, 200)
 
 
-def treemap(livros, conjunto=None):
-    """Treemap gênero -> assunto principal (no máximo 9 assuntos + "Outros assuntos" por gênero).
-    Área de cada retângulo = número de livros. conjunto = retângulo escolhido (None = todos):
-    o treemap fica aberto no gênero escolhido e o assunto escolhido ganha borda escura."""
-    if livros.empty:
-        return vazio("Nenhum livro")
-    fig = px.treemap(livros, path=[px.Constant("Todos os livros"), "genero", "assunto_treemap"],
-                     color="genero", color_discrete_map={"(?)": CINZA_CLARO, **CORES})
-    # Os retângulos têm ids do tipo "Todos os livros/Computação/INTELIGÊNCIA ARTIFICIAL"
-    genero = f"Todos os livros/{conjunto['genero']}" if conjunto else None
-    assunto = f"{genero}/{conjunto['assunto']}" if conjunto and conjunto.get("assunto") else None
-    ids = list(fig.data[0].ids)
-    fig.update_traces(
-        level=genero,  # retângulo que fica aberto (None = todos os livros)
-        marker_line_color=["#0b0b0b" if i == assunto else "white" for i in ids],
-        marker_line_width=[4 if i == assunto else 2 for i in ids],
-        root_color=CINZA_CLARO, hovertemplate="<b>%{label}</b><br>%{value} livros<extra></extra>",
-    )
-    fig.update_layout(margin=dict(l=0, r=0, t=0, b=0))
-    return layout_padrao(fig, 480)
+def clarear(cor, fracao):
+    """Mistura a cor com branco: fracao 0 = a própria cor, 1 = branco."""
+    r, g, b = (int(cor[i:i + 2], 16) for i in (1, 3, 5))
+    return "#{:02x}{:02x}{:02x}".format(*(round(c + (255 - c) * fracao) for c in (r, g, b)))
 
 
-# Nuvem de palavras: a biblioteca wordcloud calcula onde cada palavra fica e o tamanho dela;
-# desenhamos as palavras com plotly porque assim dá para clicar nelas.
-LARGURA_NUVEM, ALTURA_NUVEM = 900, 380
-
-
-def nuvem(titulos):
-    contagem = Counter(p for t in titulos for p in palavras(t))  # nº de livros com a palavra no título
-    if not contagem:
-        return vazio("Nenhuma palavra")
-    layout = WordCloud(width=LARGURA_NUVEM, height=ALTURA_NUVEM, prefer_horizontal=1, max_words=80,
-                       max_font_size=64, min_font_size=11, random_state=1).generate_from_frequencies(contagem).layout_
-    x, y, textos, tamanhos = [], [], [], []
-    alvo_x, alvo_y, alvo_tamanho, alvo_palavra = [], [], [], []
-    for (palavra, _), tamanho, (topo, esquerda), _, _ in layout:
-        largura = len(palavra) * tamanho * 0.6  # fonte monoespaçada: cada letra tem ~0,6 do tamanho
-        textos.append(palavra)
-        tamanhos.append(tamanho)
-        x.append(esquerda + largura / 2)  # centro da palavra
-        y.append(topo + tamanho / 2)
-        # Pontos invisíveis a cada 8 px ao longo da palavra: o clique funciona em qualquer parte dela
-        for i in range(int(largura // 8) + 1):
-            alvo_x.append(esquerda + 4 + 8 * i)
-            alvo_y.append(topo + tamanho / 2)
-            alvo_tamanho.append(tamanho * 0.6)  # menor que a letra, para não invadir as palavras vizinhas
-            alvo_palavra.append(palavra)
+def rosa_emprestimos(livros, n=5):
+    """Rosa (polar area / coxcomb): cada fatia é um gênero; dentro dela, os n livros mais emprestados,
+    do centro para fora (tom mais escuro = mais emprestado). A ÁREA de cada pedaço é proporcional ao
+    número de empréstimos (o raio cresce com a raiz quadrada), para não exagerar os valores grandes."""
+    generos = [g for g in CORES if g in set(livros["genero"])]
+    mais_emprestados = {g: livros[livros["genero"] == g].nlargest(n, "emprestimos") for g in generos}
     fig = go.Figure()
-    fig.add_trace(go.Scatter(  # as palavras (só desenho)
-        x=x, y=y, text=textos, mode="text", hoverinfo="skip",
-        textfont=dict(size=tamanhos, color="#2b2b28", family="Droid Sans Mono"),  # ver assets/fonte.css
-    ))
-    fig.add_trace(go.Scatter(  # os pontos invisíveis (recebem o mouse e o clique)
-        x=alvo_x, y=alvo_y, mode="markers", marker=dict(size=alvo_tamanho, opacity=0),
-        customdata=[[p, contagem[p]] for p in alvo_palavra],
-        hovertemplate="<b>%{customdata[0]}</b><br>%{customdata[1]} livro(s)<extra></extra>",
-    ))
-    fig.update_xaxes(visible=False, range=[0, LARGURA_NUVEM])
-    fig.update_yaxes(visible=False, range=[ALTURA_NUVEM, 0])
-    fig.update_layout(width=LARGURA_NUVEM, margin=dict(l=0, r=0, t=0, b=0), showlegend=False, hoverdistance=5)
-    return layout_padrao(fig, ALTURA_NUVEM)
+    for posicao in range(n):  # uma camada para o 1º mais emprestado de cada gênero, outra para o 2º, ...
+        theta, base, comprimento, cores, hover = [], [], [], [], []
+        for g in generos:
+            top = mais_emprestados[g]
+            if posicao >= len(top):
+                continue
+            livro = top.iloc[posicao]
+            antes = top["emprestimos"].iloc[:posicao].sum()  # empréstimos dos livros mais perto do centro
+            theta.append(g)
+            base.append(np.sqrt(antes))
+            comprimento.append(np.sqrt(antes + livro["emprestimos"]) - np.sqrt(antes))
+            cores.append(clarear(CORES[g], 0.15 * posicao))
+            hover.append([livro["id"], livro["titulo"], livro["emprestimos"], posicao + 1])
+        fig.add_trace(go.Barpolar(
+            theta=theta, base=base, r=comprimento, marker_color=cores,
+            marker_line_color="white", marker_line_width=1.5, customdata=hover,
+            hovertemplate="<b>%{customdata[1]}</b><br>%{theta} · %{customdata[3]}º mais emprestado"
+                          "<br>%{customdata[2]} empréstimos<extra></extra>",
+        ))
+    total_maximo = max(top["emprestimos"].sum() for top in mais_emprestados.values())
+    marcas = [m for m in [50, 100, 250, 500, 1000, 2000] if m <= total_maximo]
+    fig.update_layout(
+        showlegend=False, margin=dict(l=60, r=60, t=40, b=40),
+        polar=dict(
+            bgcolor="white", bargap=0.06,
+            angularaxis=dict(direction="clockwise", rotation=90, tickfont=dict(size=13), linecolor=CINZA_CLARO),
+            # A escala fica na divisa entre a primeira e a última fatia, para não cobrir os pedaços
+            radialaxis=dict(tickvals=np.sqrt(marcas), ticktext=marcas, angle=90 + 180 / len(generos), tickangle=90,
+                            tickfont=dict(size=10, color=TEXTO_SECUNDARIO), gridcolor=CINZA_CLARO,
+                            linecolor=CINZA_CLARO),
+        ),
+    )
+    return layout_padrao(fig, 600)
 
 
-def dispersao_uso(livros):
-    """Dispersão: ano de publicação × empréstimos; tamanho do ponto = nº de exemplares no ICMC."""
+def globo(livros):
+    """Globo (projeção ortográfica, arrastar gira). Cor = nº de livros publicados no país, em escala
+    logarítmica porque o Brasil tem muito mais livros que os outros países."""
+    por_pais = livros[livros["pais_iso3"] != ""].groupby(["pais_iso3", "pais"]).size().reset_index(name="livros")
+    if por_pais.empty:
+        return vazio("Nenhum livro")
+    fig = go.Figure(go.Choropleth(
+        locations=por_pais["pais_iso3"], z=np.log10(por_pais["livros"]),
+        text=por_pais["pais"], customdata=por_pais["livros"],
+        colorscale=["#86b6ef", "#3987e5", "#1c5cab", "#0d366b"],  # um só tom de azul: bom para daltônicos
+        zmin=0, zmax=max(1, np.log10(por_pais["livros"].max())), marker_line_color="white",
+        hovertemplate="<b>%{text}</b><br>%{customdata} livros<extra></extra>",
+        colorbar=dict(title="Livros", tickvals=[0, 1, 2, 3, 4], ticktext=["1", "10", "100", "1.000", "10.000"]),
+    ))
+    fig.update_geos(projection_type="orthographic", projection_rotation=dict(lon=-50, lat=-10),
+                    showframe=True, framecolor="#c3c2b7", showocean=True, oceancolor="#f7f7f5",
+                    showcoastlines=False, showcountries=True, countrycolor="white", showland=True, landcolor=CINZA_CLARO)
+    fig.update_layout(margin=dict(l=0, r=0, t=0, b=0))
+    return layout_padrao(fig, 560)
+
+
+def linha_do_tempo(livros):
+    """Barras empilhadas: livros publicados por ano e gênero."""
+    contagem = livros.dropna(subset=["ano"]).groupby(["ano", "genero"]).size().reset_index(name="livros")
     fig = go.Figure()
     for g, cor in CORES.items():
-        d = livros[livros["genero"] == g].dropna(subset=["ano"])
+        d = contagem[contagem["genero"] == g]
         if len(d):
-            fig.add_trace(go.Scatter(
-                x=d["ano"], y=d["emprestimos"], mode="markers", name=g,
-                marker=dict(color=cor, size=6 + 3 * d["exemplares"].clip(upper=10), opacity=0.85,
-                            line=dict(color="white", width=1)),
-                customdata=d[["id", "titulo", "exemplares"]].values,
-                hovertemplate="<b>%{customdata[1]}</b><br>%{x} · %{y} empréstimos · %{customdata[2]} exemplar(es)<extra></extra>",
-            ))
-    fig.update_xaxes(title="Ano de publicação", gridcolor=CINZA_CLARO)
-    fig.update_yaxes(title="Empréstimos (campo a confirmar com a biblioteca)", gridcolor=CINZA_CLARO)
-    fig.update_layout(legend=dict(orientation="h", y=1.1), margin=dict(l=60, r=10, t=40, b=50))
-    return layout_padrao(fig, 520)
+            fig.add_trace(go.Bar(x=d["ano"], y=d["livros"], name=g, marker_color=cor,
+                                 customdata=[g] * len(d),  # para saber o gênero da barra clicada
+                                 hovertemplate=f"<b>%{{y}} livros</b><br>{g} · %{{x}}<extra></extra>"))
+    fig.update_layout(barmode="stack", bargap=0.15, legend=dict(orientation="h", y=1.12),
+                      margin=dict(l=50, r=10, t=30, b=40))
+    fig.update_xaxes(title="Ano de publicação")
+    fig.update_yaxes(title="Livros", gridcolor=CINZA_CLARO)
+    return layout_padrao(fig, 460)

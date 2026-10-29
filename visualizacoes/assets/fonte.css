@@ -1,6 +1,0 @@
-/* Mesma fonte que a biblioteca wordcloud usa para calcular a posição das palavras,
-   assim o desenho no navegador coincide com o layout calculado (o Dash carrega a pasta assets sozinho). */
-@font-face {
-  font-family: "Droid Sans Mono";
-  src: url("DroidSansMono.ttf");
-}
