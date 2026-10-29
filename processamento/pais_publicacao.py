@@ -31,6 +31,7 @@ PAISES = {
     "ur": ("União Soviética", "RUS"), "rm": ("Romênia", "ROU"), "ja": ("Japão", "JPN"), "cc": ("China", "CHN"),
     "ch": ("Taiwan", "TWN"), "ko": ("Coreia do Sul", "KOR"), "ii": ("Índia", "IND"), "si": ("Singapura", "SGP"),
     "is": ("Israel", "ISR"), "tu": ("Turquia", "TUR"), "ir": ("Irã", "IRN"), "sa": ("África do Sul", "ZAF"),
+    "vm": ("Vietnã", "VNM"),
 }
 # Códigos de 3 letras são estados/províncias; a última letra indica o país (ex.: nyu, cau, onc, enk)
 SUFIXOS = {"u": ("Estados Unidos", "USA"), "c": ("Canadá", "CAN"), "k": ("Reino Unido", "GBR"), "a": ("Austrália", "AUS")}
