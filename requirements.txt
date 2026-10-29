@@ -3,4 +3,3 @@ pandas==3.1.0
 plotly==7.1.0
 requests==2.34.2
 wordcloud==1.9.6
-networkx==3.7

@@ -55,12 +55,22 @@ def palavras(titulo):
     return {p for p in re.findall(r"[^\W\d_]+", titulo.lower()) if len(p) > 2 and p not in PALAVRAS_VAZIAS}
 
 
+def agrupar_assuntos(livros, maximo=9):
+    """Em cada gênero, mantém os 9 assuntos principais mais comuns e junta o resto em "Outros assuntos"
+    (assim o treemap não fica com dezenas de retângulos minúsculos)."""
+    def agrupar(assuntos):
+        mais_comuns = assuntos.value_counts().index[:maximo]
+        return assuntos.where(assuntos.isin(mais_comuns), "Outros assuntos")
+    return livros.groupby("genero")["assunto_principal"].transform(agrupar)
+
+
 def carregar():
     livros = pd.read_csv(os.path.join(PASTA, "livros_icmc_paises.csv"), dtype=str).fillna("")
     # "c2015", "2014 | 2012" -> 2015, 2014 (primeiro ano que aparece)
     livros["ano"] = pd.to_numeric(livros["ano"].str.extract(r"(\d{4})")[0], errors="coerce")
     livros["genero"] = livros["assuntos"].map(genero)
     livros["assunto_principal"] = livros["assuntos"].map(lambda a: (separar(a) or ["(sem assunto)"])[0])
+    livros["assunto_treemap"] = agrupar_assuntos(livros)
     livros["idioma"] = livros["idioma"].str.split(r"[;|]").str[0].str.strip().map(lambda i: IDIOMAS.get(i, i or "?"))
     livros["paginas"] = pd.to_numeric(livros["paginas"], errors="coerce")
     livros["exemplares"] = pd.to_numeric(livros["exemplares_icmc"], errors="coerce").fillna(0).astype(int)
