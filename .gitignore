@@ -1,0 +1,7 @@
+# Slides e material da disciplina (não vão para o repositório)
+*.pdf
+
+# Cache dos XMLs baixados (regenerável rodando coleta/coletar_livros_icmc.py)
+dados/pnx/
+
+__pycache__/
